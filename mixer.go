@@ -215,6 +215,6 @@ func (f *TopicMixer) HandleLike(context.Context, *User, *bsky.FeedPost) error {
 	return nil
 }
 
-func (f *TopicMixer) HandleRepost(context.Context, *User, *postInfo, string) error {
+func (f *TopicMixer) HandleRepost(context.Context, *User, *PostRef, string) error {
 	return nil
 }

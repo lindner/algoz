@@ -81,6 +81,11 @@ type User struct {
 	Lk sync.Mutex `gorm:"-"`
 }
 
+type PostCountTask struct {
+	gorm.Model
+	Count int
+}
+
 func (u *User) DoLocked(f func() error) error {
 	u.Lk.Lock()
 	defer u.Lk.Unlock()

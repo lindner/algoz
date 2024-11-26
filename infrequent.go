@@ -205,6 +205,6 @@ func (f *InfrequentPosters) HandleLike(context.Context, *User, *bsky.FeedPost) e
 	return nil
 }
 
-func (f *InfrequentPosters) HandleRepost(context.Context, *User, *postInfo, string) error {
+func (f *InfrequentPosters) HandleRepost(context.Context, *User, *PostRef, string) error {
 	return nil
 }

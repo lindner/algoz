@@ -127,7 +127,7 @@ func (f *DevFeed) HandleLike(context.Context, *User, *bsky.FeedPost) error {
 	return nil
 }
 
-func (f *DevFeed) HandleRepost(ctx context.Context, u *User, pref *postInfo, text string) error {
+func (f *DevFeed) HandleRepost(ctx context.Context, u *User, pref *PostRef, text string) error {
 	isDev, err := f.userIsDev(ctx, u)
 	if err != nil {
 		return err

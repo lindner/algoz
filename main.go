@@ -78,6 +78,10 @@ type FeedBuilder interface {
 	Processor
 }
 
+func (s *Server) runCountAggregator() {
+	// TODO - Implement the logic for runCountAggregator here
+}
+
 type Labeler interface {
 	Processor
 }
@@ -85,7 +89,7 @@ type Labeler interface {
 type Processor interface {
 	HandlePost(context.Context, *User, *PostRef, *bsky.FeedPost) error
 	HandleLike(context.Context, *User, *bsky.FeedPost) error
-	HandleRepost(context.Context, *User, *postInfo, string) error
+	HandleRepost(context.Context, *User, *PostRef, string) error
 }
 
 type LastSeq struct {
@@ -132,7 +136,7 @@ type Server struct {
 	userCache *lru.Cache
 	keyCache  *lru.Cache
 
-	postCache *arc.ARCCache[syntax.ATURI, *postInfo] // fast string (AT-URI) to {uid, post-id}; mapping is stable
+	postCache *arc.ARCCache[syntax.ATURI, *PostRef] // fast string (AT-URI) to {uid, post-id}; mapping is stable
 	didCache  *arc.ARCCache[uint, string]
 
 	Maintenance        bool
@@ -259,7 +263,7 @@ var runCmd = &cli.Command{
 
 		ucache, _ := lru.New(1_500_000)
 		kcache, _ := lru.New(1_500_000)
-		pcache, _ := arc.NewARC[syntax.ATURI, *postInfo](3_000_000)
+		pcache, _ := arc.NewARC[syntax.ATURI, *PostRef](3_000_000)
 		dcache, _ := arc.NewARC[uint, string](3_000_000)
 		s := &Server{
 			db:                 db,
@@ -1268,6 +1272,14 @@ func (s *Server) deleteLike(ctx context.Context, u *User, path string) error {
 	return s.db.Delete(&FeedLike{}, "id = ?", lk.ID).Error
 }
 
+func (s *Server) decrementLikeCount(ctx context.Context, postID uint) error {
+	return s.db.Model(&PostRef{}).Where("id = ?", postID).Update("likes", gorm.Expr("likes - 1")).Error
+}
+
+func (s *Server) incrementLikeCount(ctx context.Context, postID uint) error {
+	return s.db.Model(&PostRef{}).Where("id = ?", postID).Update("likes", gorm.Expr("likes + 1")).Error
+}
+
 func (s *Server) deleteRepost(ctx context.Context, u *User, path string) error {
 	parts := strings.Split(path, "/")
 
@@ -1289,6 +1301,14 @@ func (s *Server) deleteRepost(ctx context.Context, u *User, path string) error {
 	return s.db.Delete(&rp).Error
 }
 
+func (s *Server) decrementRepostCount(ctx context.Context, postID uint) error {
+	return s.db.Model(&PostRef{}).Where("id = ?", postID).Update("reposts", gorm.Expr("reposts - 1")).Error
+}
+
+func (s *Server) incrementRepostCount(ctx context.Context, postID uint) error {
+	return s.db.Model(&PostRef{}).Where("id = ?", postID).Update("reposts", gorm.Expr("reposts + 1")).Error
+}
+
 func (s *Server) deleteFollow(ctx context.Context, u *User, path string) error {
 	parts := strings.Split(path, "/")
 
@@ -1299,6 +1319,29 @@ func (s *Server) deleteFollow(ctx context.Context, u *User, path string) error {
 	}
 
 	return nil
+}
+
+func (s *Server) getPostInfo(ctx context.Context, uri string) (*PostRef, error) {
+	puri, err := util.ParseAtUri(uri)
+	if err != nil {
+		return nil, err
+	}
+
+	u, err := s.getOrCreateUser(ctx, puri.Did)
+	if err != nil {
+		return nil, err
+	}
+
+	var ref PostRef
+	if err := s.db.Find(&ref, "uid = ? AND rkey = ?", u.ID, puri.Rkey).Error; err != nil {
+		return nil, err
+	}
+
+	if ref.ID == 0 {
+		return nil, fmt.Errorf("post not found: %s", uri)
+	}
+
+	return &ref, nil
 }
 
 func (s *Server) indexPost(ctx context.Context, u *User, rec *bsky.FeedPost, path string) error {
@@ -1321,11 +1364,11 @@ func (s *Server) indexPost(ctx context.Context, u *User, rec *bsky.FeedPost, pat
 	}
 
 	if rec.Reply != nil && rec.Reply.Root != nil {
-		repto, err := s.getPostInfo(ctx, rec.Reply.Parent.Uri)
+		replyto, err := s.getPostInfo(ctx, rec.Reply.Parent.Uri)
 		if err != nil {
 			return err
 		}
-		pref.ReplyTo = repto.ID
+		pref.ReplyTo = replyto.ID
 		pref.IsReply = true
 
 		reproot, err := s.getPostInfo(ctx, rec.Reply.Root.Uri)
@@ -1415,7 +1458,7 @@ func (s *Server) setUserLastPost(u *User, p *PostRef) error {
 	})
 }
 
-/*
+
 func (s *Server) incrementReplyTo(ctx context.Context, uri string) error {
 	pref, err := s.getPostByUri(ctx, uri)
 	if err != nil {
@@ -1428,7 +1471,19 @@ func (s *Server) incrementReplyTo(ctx context.Context, uri string) error {
 
 	return err
 }
-*/
+
+func (s *Server) incrementReplyRoot(ctx context.Context, uri string) error {
+	pref, err := s.getPostByUri(ctx, uri)
+	if err != nil {
+		return err
+	}
+
+	if err := s.db.Model(&PostRef{}).Where("id = ?", pref.ID).Update("thread_size", gorm.Expr("thread_size + 1")).Error; err != nil {
+		return err
+	}
+
+	return nil
+}
 
 func (s *Server) getPostByUri(ctx context.Context, uri string) (*PostRef, error) {
 	puri, err := util.ParseAtUri(uri)

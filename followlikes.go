@@ -412,6 +412,6 @@ func (f *FollowLikes) HandleLike(context.Context, *User, *bsky.FeedPost) error {
 	return nil
 }
 
-func (f *FollowLikes) HandleRepost(context.Context, *User, *postInfo, string) error {
+func (f *FollowLikes) HandleRepost(context.Context, *User, *PostRef, string) error {
 	return nil
 }

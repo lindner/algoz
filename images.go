@@ -22,7 +22,7 @@ type ImageLabeler struct {
 	addLabel AddLabelFunc
 }
 
-type AddLabelFunc func(context.Context, string, *PostRef) error
+type AddLabelFunc func(context.Context, string, uint) error
 
 func NewImageLabeler(classifierHost string, db *gorm.DB, xrpcc *xrpc.Client, fetcher *ImageFetcher, addlabel AddLabelFunc) *ImageLabeler {
 	ic := &ImageClassifier{
@@ -49,19 +49,19 @@ func (il *ImageLabeler) HandlePost(ctx context.Context, u *User, pref *PostRef, 
 
 			switch class {
 			case "cat":
-				if err := il.addLabel(ctx, "cats", pref); err != nil {
+				if err := il.addLabel(ctx, "cats", pref.ID); err != nil {
 					return err
 				}
 			case "dog":
-				if err := il.addLabel(ctx, "dogs", pref); err != nil {
+				if err := il.addLabel(ctx, "dogs", pref.ID); err != nil {
 					return err
 				}
 			case "sea creature":
-				if err := il.addLabel(ctx, "seacreatures", pref); err != nil {
+				if err := il.addLabel(ctx, "seacreatures", pref.ID); err != nil {
 					return err
 				}
 			case "flower":
-				if err := il.addLabel(ctx, "flowers", pref); err != nil {
+				if err := il.addLabel(ctx, "flowers", pref.ID); err != nil {
 					return err
 				}
 			}

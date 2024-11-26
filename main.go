@@ -198,7 +198,7 @@ var runCmd = &cli.Command{
 	},
 	Action: func(cctx *cli.Context) error {
 
-		//logging.SetLogLevel("*", "INFO")
+		logging.SetLogLevel("*", "INFO")
 		maintenance := cctx.Bool("maintenance")
 
 		log.Info("Connecting to database")
@@ -393,10 +393,10 @@ var runCmd = &cli.Command{
 		folikeuri := "at://" + middlebit + "followlikes"
 		s.AddFeedBuilder(folikeuri, NewFollowLikes(s))
 
-		//fetcher := NewImageFetcher(s.xrpcc)
+		fetcher := NewImageFetcher(s.xrpcc)
 
-		//s.AddProcessor(NewImageLabeler(cctx.String("img-class-host"), s.db, s.xrpcc, fetcher, s.addPostToFeed))
-		//s.AddProcessor(NewGoodPostFinder(cctx.String("qualitea-class-host"), fetcher, s.addPostToFeed))
+		s.AddProcessor(NewImageLabeler(cctx.String("img-class-host"), s.db, s.xrpcc, fetcher, s.addPostToFeed))
+		// s.AddProcessor(NewGoodPostFinder(cctx.String("qualitea-class-host"), fetcher, s.addPostToFeed))
 
 		mixtopicsuri := "at://" + middlebit + "topicmix"
 		s.AddFeedBuilder(mixtopicsuri, NewTopicMixer(s))

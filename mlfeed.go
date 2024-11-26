@@ -52,7 +52,7 @@ func (gpf *GoodPostFinder) HandlePost(ctx context.Context, u *User, pref *PostRe
 	}
 
 	if good {
-		if err := gpf.addLabel(ctx, "qualitea", pref); err != nil {
+		if err := gpf.addLabel(ctx, "qualitea", pref.ID); err != nil {
 			return err
 		}
 	}

@@ -1,4 +1,5 @@
-from bottle import route, request, run
+from fastapi import FastAPI, File, UploadFile, Query
+from fastapi.responses import PlainTextResponse
 from PIL import Image
 from io import BytesIO
 import torch
@@ -11,6 +12,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 model, preprocess = load("ViT-B/32", device=device)
 
 
+app = FastAPI()
+
 # Image transformation pipeline
 transform = Compose([
     Resize(256),
@@ -18,18 +21,16 @@ transform = Compose([
     ToTensor()
 ])
 
-@route('/classify_image/', method='POST')
-def classify_image():
-    # Get categories from query parameters
-    categories = request.query.getall('category')
-
-    upload = request.files.get('upload')
+@app.post('/classify_image/')
+def classify_image(category: list[str] = Query(1), upload: UploadFile = File(...)):
+    # processes categories as a query param
     raw = upload.file.read()  # this is dangerous for big files
     image = Image.open(BytesIO(raw)).convert('RGB')
     
     # Preprocess the image
     image = transform(image)
     image = image.unsqueeze(0).to(device)
+    categories = category
     
     print("categories: ", categories)
 
@@ -68,7 +69,4 @@ def classify_image():
             "similarity_score": similarity_score,
             "values": values
         }
-
-
-run(host='0.0.0.0', port=8181)
 

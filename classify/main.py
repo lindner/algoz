@@ -1,6 +1,11 @@
 import asyncio
 import time
+import logging
+import os
+import sys
 
+from tempfile import SpooledTemporaryFile
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile, Query, Request, Response
 from fastapi.responses import JSONResponse
 from PIL import Image
@@ -13,9 +18,11 @@ from starlette.status import HTTP_504_GATEWAY_TIMEOUT, HTTP_429_TOO_MANY_REQUEST
 
 # Load the CLIP model
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model, preprocess = load("ViT-B/32", device=device)
 
-app = FastAPI()
+
+# Configure logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO) 
 
 # Image transformation pipeline
 transform = Compose([
@@ -24,9 +31,24 @@ transform = Compose([
     ToTensor()
 ])
 
-REQUEST_TIMEOUT_ERROR = 2  # Threshold
+REQUEST_TIMEOUT_ERROR = 5  # Threshold
 
-# Adding a middleware returning a 504 error if the request processing time is above a certain threshold
+# Load ML Models at Server Init time
+# Without this GPU memory is allocatd in multiple processes
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Loading ML Models")
+    # load the ML Model
+    model, preprocess = clip.load("ViT-B/32", device=device)
+
+    # TODO make a type-safe holder
+    app.model = model
+    yield
+    logger.info("Unloading ML Models")
+
+app = FastAPI(name="Image Classify", lifespan=lifespan)
+
+# Return a 504 error if the request processing time is above a certain threshold
 @app.middleware("http")
 async def timeout_middleware(request: Request, call_next):
     try:
@@ -39,41 +61,30 @@ async def timeout_middleware(request: Request, call_next):
                              'processing_time': process_time},
                             status_code=HTTP_504_GATEWAY_TIMEOUT)
 
+
 @app.post('/classify_image/')
 def classify_image(category: list[str] = Query(1), upload: UploadFile = File(...)):
     # processes categories as a query param
     categories = category
-    print("categories: ", categories)
+    logger.info(f"categories: {categories}")
 
     raw = upload.file.read()  # this is dangerous for big files
-    try:
-      image = Image.open(BytesIO(raw)).convert('RGB')
+    image = Image.open(BytesIO(raw)).convert('RGB')
     
-      # Preprocess the image
-      image = transform(image)
-      image = image.unsqueeze(0).to(device)
+    # Preprocess the image
+    image = transform(image)
+    image = image.unsqueeze(0).to(device)
 
-      # Prepare the text inputs
-      text = torch.cat([clip.tokenize(f"a photo of a {c}") for c in categories]).to(device)
+    # Prepare the text inputs
+    text = torch.cat([clip.tokenize(f"a photo of a {c}") for c in categories]).to(device)
     
-      # Compute the features and compare the image to the text inputs
-      with torch.no_grad():
-          image_features = model.encode_image(image)
-          text_features = model.encode_text(text)
+    # Compute the features and compare the image to the text inputs
+    with torch.no_grad():
+        image_features = app.model.encode_image(image)
+        text_features = app.model.encode_text(text)
         
-      # Compute the raw similarity score
-      similarity = (100.0 * image_features @ text_features.T)
-
-      # try to reduce gpu memory
-      del image_features, text_features, text, image
-    except RuntimeError as e:
-      if 'out of memory' in str(e):
-        print("CUDA out of memory..")
-        return JSONResponse({'detail': 'Failed to allocate GPU memory'},
-                            status_code=HTTP_429_TOO_MANY_REQUESTS)
-        # Retry your training code with reduced batch size
-      else:
-        raise e 
+    # Compute the raw similarity score
+    similarity = (100.0 * image_features @ text_features.T)
 
     similarity_softmax = similarity.softmax(dim=-1)
     
@@ -82,6 +93,7 @@ def classify_image(category: list[str] = Query(1), upload: UploadFile = File(...
 
     # Get the highest scoring category
     max_raw_score = torch.max(similarity)
+
     if max_raw_score < threshold:
         return {
             "file_size": len(raw), 
@@ -101,3 +113,22 @@ def classify_image(category: list[str] = Query(1), upload: UploadFile = File(...
             "values": values
         }
 
+@app.get('/about')
+def show_about():
+    """
+    Get deployment information, for debugging
+    """
+
+    def bash(command):
+        output = os.popen(command).read()
+        return output
+
+    return {
+        "sys.version": sys.version,
+        "torch.__version__": torch.__version__,
+        "torch.cuda.is_available()": torch.cuda.is_available(),
+        "torch.version.cuda": torch.version.cuda,
+        "torch.backends.cudnn.version()": torch.backends.cudnn.version(),
+        "torch.backends.cudnn.enabled": torch.backends.cudnn.enabled,
+        "nvidia-smi": bash('nvidia-smi')
+    }

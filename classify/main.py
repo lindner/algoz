@@ -15,10 +15,10 @@ from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor
 import clip
 from clip import load
 from starlette.status import HTTP_504_GATEWAY_TIMEOUT, HTTP_429_TOO_MANY_REQUESTS
+from prometheus_fastapi_instrumentator import Instrumentator
 
 # Load the CLIP model
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ transform = Compose([
 REQUEST_TIMEOUT_ERROR = 5  # Threshold
 
 # Load ML Models at Server Init time
+# Also augment with prometheus
 # Without this GPU memory is allocatd in multiple processes
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -41,12 +42,15 @@ async def lifespan(app: FastAPI):
     # load the ML Model
     model, preprocess = clip.load("ViT-B/32", device=device)
 
+    instrumentator.expose(app)
+
     # TODO make a type-safe holder
     app.model = model
     yield
     logger.info("Unloading ML Models")
 
 app = FastAPI(name="Image Classify", lifespan=lifespan)
+instrumentator = Instrumentator().instrument(app)
 
 # Return a 504 error if the request processing time is above a certain threshold
 @app.middleware("http")
